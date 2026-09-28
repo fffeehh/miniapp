@@ -166,11 +166,12 @@
 
   function save() {
     const days = [...selected].sort((a, b) => a - b);
-    if (!inTg) { alert('Вне Telegram сохранить нельзя. Выбрано: ' + JSON.stringify(days)); return; }
+    if (!tg) { alert('Скрипт Telegram не загрузился, сохранить не получится. Выбрано: ' + JSON.stringify(days)); return; }
     try {
       tg.sendData(JSON.stringify(days));
     } catch (e) {
-      tg.showAlert('Открой календарь через кнопку внизу чата с ботом, иначе он не сможет сохранить выбор.');
+      alert('Не удалось отправить боту: ' + (e && e.message ? e.message : e) +
+        '. Открой календарь через кнопку внизу чата с ботом.');
     }
   }
   if (inTg) tg.MainButton.onClick(save);
