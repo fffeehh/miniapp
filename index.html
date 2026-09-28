@@ -91,7 +91,9 @@
   const MONTH_GEN = 'октября';
 
   const tg = window.Telegram && window.Telegram.WebApp;
-  const inTg = !!(tg && tg.initData);
+  // Признаки того, что страница открыта внутри Telegram: стартовые данные, платформа или тема.
+  const inTg = !!(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')
+    || Object.keys(tg.themeParams || {}).length));
   if (tg) { tg.ready(); tg.expand(); }
 
   // Бот передаёт в адрес страницы параметр d: {"me":[...], "all":[{"n":"Имя","d":[...]}], "total":8}
