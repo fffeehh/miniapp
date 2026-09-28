@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Когда собираемся</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8a8e);
+    --accent: var(--tg-theme-button-color, #2ea6ff);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --card: var(--tg-theme-secondary-bg-color, #f2f2f7);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px 16px 96px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--hint); font-size: 14px; margin: 0 0 16px; }
+  .tabs { display: flex; background: var(--card); border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+  .tab {
+    flex: 1; text-align: center; padding: 8px; border-radius: 9px;
+    font-size: 15px; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  .tab.active { background: var(--bg); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .wd { text-align: center; font-size: 12px; color: var(--hint); padding-bottom: 4px; }
+  .day {
+    aspect-ratio: 1; border-radius: 12px; background: var(--card);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 17px; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+    transition: transform .08s;
+  }
+  .day:active { transform: scale(.94); }
+  .day.empty { background: transparent; cursor: default; }
+  .day.weekend { font-weight: 600; }
+  .day.sel { background: var(--accent); color: var(--accent-text); }
+  .day.picked { outline: 3px solid var(--text); outline-offset: -3px; }
+  .day .cnt { font-size: 11px; line-height: 1; margin-top: 3px; opacity: .85; }
+  .info { margin-top: 16px; background: var(--card); border-radius: 12px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }
+  .info h2 { font-size: 15px; margin: 0 0 6px; }
+  .info p { margin: 4px 0; }
+  .muted { color: var(--hint); }
+  .hidden { display: none; }
+  #fallbackBtn {
+    position: fixed; left: 16px; right: 16px; bottom: 16px; padding: 14px; border: 0;
+    border-radius: 12px; background: var(--accent); color: var(--accent-text);
+    font-size: 16px; font-weight: 600; display: none;
+  }
+</style>
+</head>
+<body>
+  <h1>Когда собираемся?</h1>
+  <p class="sub" id="subtitle">Октябрь 2026. Нажми на дни, когда ты свободен.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="mine">Мои дни</div>
+    <div class="tab" data-tab="all">Кто когда</div>
+  </div>
+
+  <div id="mine">
+    <div class="grid" id="gridMine"></div>
+    <div class="info">
+      <p id="mineStatus" class="muted">Ничего не выбрано.</p>
+    </div>
+  </div>
+
+  <div id="all" class="hidden">
+    <div class="grid" id="gridAll"></div>
+    <div class="info" id="best"></div>
+    <div class="info hidden" id="details"></div>
+  </div>
+
+  <button id="fallbackBtn">Сохранить</button>
+
+<script>
+(function () {
+  // Месяц и год календаря. Месяцы в JS считаются с нуля, поэтому октябрь = 9.
+  const YEAR = 2026, MONTH = 9;
+  const DAYS = new Date(YEAR, MONTH + 1, 0).getDate();
+  const FIRST = (new Date(YEAR, MONTH, 1).getDay() + 6) % 7; // 0 — понедельник
+  const WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const WD_LONG = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+  const MONTH_GEN = 'октября';
+
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const inTg = !!(tg && tg.initData);
+  if (tg) { tg.ready(); tg.expand(); }
+
+  // Бот передаёт в адрес страницы параметр d: {"me":[...], "all":[{"n":"Имя","d":[...]}], "total":8}
+  let payload = { me: [], all: [], total: 8 };
+  try {
+    const raw = new URLSearchParams(location.search).get('d');
+    if (raw) payload = Object.assign(payload, JSON.parse(raw));
+  } catch (e) { /* без данных от бота календарь просто пустой */ }
+
+  const selected = new Set(payload.me);
+  const answered = payload.all.length;
+  const byDay = {};
+  for (let d = 1; d <= DAYS; d++) byDay[d] = payload.all.filter(p => p.d.includes(d)).map(p => p.n);
+
+  const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (user && user.first_name) {
+    document.getElementById('subtitle').textContent =
+      user.first_name + ', нажми на дни октября, когда ты свободен.';
+  }
+
+  function weekdayOf(d) { return (FIRST + d - 1) % 7; }
+  function fmt(d) { return d + ' ' + MONTH_GEN + ', ' + WD_LONG[weekdayOf(d)]; }
+  function fmtShort(d) { return d + ' ' + WD_SHORT[weekdayOf(d)].toLowerCase(); }
+  function haptic() { try { tg.HapticFeedback.selectionChanged(); } catch (e) {} }
+
+  function accentRgb() {
+    const c = (tg && tg.themeParams && tg.themeParams.button_color) || '#2ea6ff';
+    const m = /^#?([0-9a-f]{6})$/i.exec(c);
+    const h = m ? m[1] : '2ea6ff';
+    return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+  }
+  const [ar, ag, ab] = accentRgb();
+
+  function buildGrid(el, onCell) {
+    el.innerHTML = '';
+    WD_SHORT.forEach(w => { const h = document.createElement('div'); h.className = 'wd'; h.textContent = w; el.appendChild(h); });
+    for (let i = 0; i < FIRST; i++) { const e = document.createElement('div'); e.className = 'day empty'; el.appendChild(e); }
+    for (let d = 1; d <= DAYS; d++) {
+      const c = document.createElement('div');
+      c.className = 'day' + (weekdayOf(d) >= 5 ? ' weekend' : '');
+      c.dataset.day = d;
+      c.textContent = d;
+      c.addEventListener('click', () => onCell(d, c));
+      el.appendChild(c);
+    }
+  }
+
+  // Вкладка «Мои дни»
+  const gridMine = document.getElementById('gridMine');
+  const mineStatus = document.getElementById('mineStatus');
+  const fallbackBtn = document.getElementById('fallbackBtn');
+
+  function refreshMine() {
+    gridMine.querySelectorAll('.day[data-day]').forEach(c => c.classList.toggle('sel', selected.has(+c.dataset.day)));
+    const days = [...selected].sort((a, b) => a - b);
+    mineStatus.textContent = days.length
+      ? 'Свободен: ' + days.map(fmtShort).join(', ')
+      : 'Ничего не выбрано. Нажми на дни, когда можешь.';
+    mineStatus.classList.toggle('muted', !days.length);
+    const label = days.length ? 'Сохранить (' + days.length + ')' : 'Сохранить';
+    if (inTg) { tg.MainButton.setText(label); tg.MainButton.show(); }
+    else { fallbackBtn.textContent = label; fallbackBtn.style.display = 'block'; }
+  }
+
+  buildGrid(gridMine, d => {
+    if (selected.has(d)) selected.delete(d); else selected.add(d);
+    haptic();
+    refreshMine();
+  });
+
+  function save() {
+    const days = [...selected].sort((a, b) => a - b);
+    if (!inTg) { alert('Вне Telegram сохранить нельзя. Выбрано: ' + JSON.stringify(days)); return; }
+    try {
+      tg.sendData(JSON.stringify(days));
+    } catch (e) {
+      tg.showAlert('Открой календарь через кнопку внизу чата с ботом, иначе он не сможет сохранить выбор.');
+    }
+  }
+  if (inTg) tg.MainButton.onClick(save);
+  fallbackBtn.addEventListener('click', save);
+
+  // Вкладка «Кто когда»
+  const gridAll = document.getElementById('gridAll');
+  const best = document.getElementById('best');
+  const details = document.getElementById('details');
+  let picked = null;
+
+  function showDetails(d) {
+    picked = d;
+    gridAll.querySelectorAll('.day[data-day]').forEach(c => c.classList.toggle('picked', +c.dataset.day === d));
+    const free = byDay[d];
+    const busy = payload.all.map(p => p.n).filter(n => !free.includes(n));
+    details.classList.remove('hidden');
+    details.innerHTML =
+      '<h2>' + fmt(d) + '</h2>' +
+      '<p>Могут (' + free.length + ' из ' + answered + '): ' + (free.length ? free.join(', ') : '<span class="muted">никто</span>') + '</p>' +
+      (busy.length ? '<p class="muted">Не могут: ' + busy.join(', ') + '</p>' : '');
+  }
+
+  buildGrid(gridAll, d => { haptic(); showDetails(d); });
+
+  function refreshAll() {
+    gridAll.querySelectorAll('.day[data-day]').forEach(c => {
+      const d = +c.dataset.day, n = byDay[d].length;
+      c.innerHTML = d + (n ? '<span class="cnt">' + n + '</span>' : '');
+      if (n) {
+        const a = 0.18 + 0.82 * (n / Math.max(answered, 1));
+        c.style.background = 'rgba(' + ar + ',' + ag + ',' + ab + ',' + a.toFixed(2) + ')';
+        c.style.color = a > 0.55 ? '#fff' : '';
+      } else { c.style.background = ''; c.style.color = ''; }
+    });
+    if (!answered) {
+      best.innerHTML = '<p class="muted">Пока никто не отметил дни. Ты будешь первым.</p>';
+      return;
+    }
+    const max = Math.max(...Object.values(byDay).map(v => v.length));
+    const bestDays = Object.keys(byDay).map(Number).filter(d => byDay[d].length === max && max > 0);
+    const names = payload.all.map(p => p.n).join(', ');
+    best.innerHTML =
+      '<h2>Ответили ' + answered + ' из ' + payload.total + '</h2>' +
+      '<p class="muted">' + names + '</p>' +
+      (max
+        ? '<p>Лучшие дни (' + (max === answered ? 'могут все ответившие' : max + ' из ' + answered) + '): ' + bestDays.map(fmtShort).join(', ') + '</p>'
+        : '<p class="muted">Ни одного свободного дня пока не отмечено.</p>') +
+      '<p class="muted">Нажми на день, чтобы увидеть, кто может.</p>';
+  }
+
+  // Переключение вкладок
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+    const isMine = t.dataset.tab === 'mine';
+    document.getElementById('mine').classList.toggle('hidden', !isMine);
+    document.getElementById('all').classList.toggle('hidden', isMine);
+    haptic();
+  }));
+
+  refreshMine();
+  refreshAll();
+})();
+</script>
+</body>
+</html>
